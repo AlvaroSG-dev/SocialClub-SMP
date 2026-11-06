@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; img-src 'self' data:; script-src 'self'" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Launcher</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="theme.css" />
+</head>
+<body>
+  <canvas id="bg-canvas" aria-hidden="true"></canvas>
+  <div class="shade"></div>
+
+  <main class="layout">
+    <header class="top">
+      <div class="brand">
+        <img class="logo" id="logo" src="assets/icon-64.png" alt="" width="36" height="36" />
+        <span id="brand-name">Launcher</span>
+      </div>
+      <div class="top-actions">
+        <button class="link" id="open-skins">Skin</button>
+        <button class="link" id="open-folder" title="Abrir carpeta del juego">Carpeta del juego</button>
+      </div>
+    </header>
+
+    <section class="center">
+      <article class="card server">
+        <img class="server-icon" src="assets/icon-64.png" alt="" width="128" height="128" />
+        <div class="server-info">
+          <h2 id="server-name">Servidor</h2>
+          <p class="muted" id="server-meta"></p>
+          <div class="status"><span class="dot" id="dot"></span><span id="status-text">Comprobando…</span></div>
+        </div>
+      </article>
+
+      <article class="card news">
+        <h3>Novedades</h3>
+        <div id="news-list"></div>
+      </article>
+    </section>
+
+    <footer class="bottom">
+      <div class="field account">
+        <div class="tabs" role="tablist">
+          <button class="tab" id="tab-offline" role="tab">Sin cuenta premium</button>
+          <button class="tab" id="tab-microsoft" role="tab">Cuenta Microsoft</button>
+        </div>
+
+        <div id="pane-offline">
+          <label for="username">Nombre de jugador</label>
+          <input id="username" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Steve" />
+        </div>
+
+        <div id="pane-microsoft" hidden>
+          <label>Cuenta</label>
+          <div class="ms-row">
+            <span class="ms-name" id="ms-name">Sin sesión iniciada</span>
+            <button class="small" id="ms-login">Iniciar sesión</button>
+            <button class="small ghost" id="ms-logout" hidden>Cerrar sesión</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="field ram">
+        <label for="ram">Memoria RAM: <b id="ram-label"></b></label>
+        <input id="ram" type="range" min="2048" max="16384" step="512" />
+      </div>
+
+      <div class="play-wrap">
+        <div class="stage" id="stage">&nbsp;</div>
+        <div class="bar"><div class="fill" id="fill"></div></div>
+        <button id="play" class="play">JUGAR</button>
+      </div>
+    </footer>
+
+    <details class="log-wrap">
+      <summary>Registro</summary>
+      <pre id="log"></pre>
+    </details>
+  </main>
+
+  <!-- Código de inicio de sesión de Microsoft -->
+  <div class="modal" id="code-modal" hidden>
+    <div class="dialog">
+      <h3>Inicia sesión en Microsoft</h3>
+      <p class="muted">Se ha abierto tu navegador. Si no, entra en <b>microsoft.com/link</b> e introduce este código:</p>
+      <div class="big-code" id="ms-code">----</div>
+      <p class="muted small-text">Esta ventana se cerrará sola cuando termines.</p>
+    </div>
+  </div>
+
+  <!-- Skins -->
+  <div class="modal" id="skin-modal" hidden>
+    <div class="dialog wide">
+      <div class="dialog-head">
+        <h3>Tu skin</h3>
+        <button class="link" id="skin-close">Cerrar</button>
+      </div>
+
+      <div class="skin-layout">
+        <div class="skin-col">
+          <div class="skin-stage">
+            <canvas id="skin-canvas" width="360" height="440" aria-label="Vista 3D de tu skin"></canvas>
+
+            <button class="stage-btn play-btn" id="skin-play" aria-label="Reproducir animación" aria-pressed="false" title="Reproducir / pausar animación">
+              <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
+              <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg>
+            </button>
+
+            <span class="stage-chip" id="skin-model-label">Brazos anchos (Steve)</span>
+
+            <div class="bg-picker">
+              <div class="bg-menu" id="bg-menu" role="menu" hidden>
+                <button role="menuitem" data-bg="cerezal">Cerezal</button>
+                <button role="menuitem" data-bg="pradera">Pradera</button>
+                <button role="menuitem" data-bg="noche">Noche</button>
+                <button role="menuitem" data-bg="claro">Claro</button>
+                <button role="menuitem" data-bg="transparente">Sin fondo</button>
+              </div>
+              <button class="stage-btn" id="bg-btn" aria-haspopup="menu" aria-expanded="false">Fondo <span class="caret">▲</span></button>
+            </div>
+          </div>
+
+          <div class="views" id="skin-views" role="group" aria-label="Vista">
+            <button class="view-chip" data-view="front">Frente</button>
+            <button class="view-chip active" data-view="threeq">3/4</button>
+            <button class="view-chip" data-view="side">Lado</button>
+            <button class="view-chip" data-view="back">Espalda</button>
+          </div>
+          <p class="muted small-text hint">Arrastra el personaje para girarlo</p>
+        </div>
+
+        <div class="skin-side">
+          <section class="skin-sec first">
+            <h4>Elige tu skin</h4>
+            <p class="muted small-text" id="skin-sec-ms">Con cuenta Microsoft se guarda en tu cuenta de Minecraft y se ve en cualquier servidor.</p>
+            <p class="muted small-text" id="skin-sec-off">Elige tu PNG y pulsa Aplicar: se verá en el servidor sin escribir ningún comando (se usa el nombre que pusiste para jugar).</p>
+            <div class="skin-controls">
+              <div class="row">
+                <button class="small" id="skin-pick">Elegir PNG…</button>
+                <span class="muted small-text" id="skin-file">Ningún archivo (64x64)</span>
+              </div>
+              <select id="skin-variant">
+                <option value="classic">Brazos anchos (Steve)</option>
+                <option value="slim">Brazos finos (Alex)</option>
+              </select>
+              <button class="small" id="skin-upload" disabled>Subir a mi cuenta</button>
+            </div>
+            <p class="note" id="skin-msg" aria-live="polite"></p>
+          </section>
+
+          <section class="skin-sec" id="skin-sec-cmd">
+            <h4>Sin cuenta premium</h4>
+            <p class="muted small-text">La skin la gestiona el servidor. Entra al juego y escribe este comando en el chat, con la dirección de tu imagen PNG:</p>
+            <div class="cmd-row">
+              <code id="skin-cmd"></code>
+              <button class="small" id="skin-copy">Copiar</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="vendor/skinview3d.bundle.js"></script>
+  <script src="skin-scenes.js"></script>
+  <script src="skin-view.js"></script>
+  <script src="bg.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

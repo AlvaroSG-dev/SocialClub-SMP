@@ -1,0 +1,30 @@
+{
+  "launcherName": "SocialClub SMP",
+  "dataFolderName": ".socialclub-smp",
+  "server": {
+    "name": "SocialClub SMP",
+    "host": "social.my.pebble.host",
+    "port": 25565
+  },
+  "minecraftVersion": "1.21.1",
+  "neoforgeVersion": "21.1.248",
+  "javaMajor": 21,
+  "defaultRamMb": 4096,
+  "strictSyncDirs": [
+    "mods"
+  ],
+  "news": [
+    {
+      "title": "¡Bienvenido a SocialClub SMP!",
+      "date": "2026-11-06",
+      "text": "Pon tu nombre, pulsa JUGAR y entrarás directo al servidor. Los mods se instalan solos."
+    }
+  ],
+  "microsoft": {
+    "clientId": null
+  },
+  "skins": {
+    "serverUrl": "https://socialclub-skins.socialmc.workers.dev",
+    "command": "/skin set web \"URL_DE_TU_SKIN\""
+  }
+}

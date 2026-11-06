@@ -1,0 +1,8 @@
+name = "socialclub-skins"
+main = "worker.mjs"
+compatibility_date = "2024-11-01"
+
+# Crea el KV con:  npx wrangler kv namespace create SKINS   y pega aquí el id que te devuelve
+[[kv_namespaces]]
+binding = "SKINS"
+id = "6a799f5b49704bc4a43b2bbd8ce8b667"
