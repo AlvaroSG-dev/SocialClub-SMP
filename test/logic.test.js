@@ -224,8 +224,56 @@ const { findJava } = require('../lib/java');
     const gd2 = fs.mkdtempSync(path.join(tmp, 'csl-'));
     writeSkinLoaderConfig({ gameDir: gd2, serverUrl: U + '/' });
     const cfg = JSON.parse(fs.readFileSync(path.join(gd2, 'CustomSkinLoader', 'CustomSkinLoader.json'), 'utf8'));
-    assert.deepStrictEqual(cfg.loadlist[0], { name: 'SocialClub', type: 'CustomSkinAPI', root: U + '/' });
-    assert.strictEqual(cfg.loadlist[1].type, 'MojangAPI');
+    assert.deepStrictEqual(cfg.loadlist, [{ name: 'SocialClub', type: 'CustomSkinAPI', root: U + '/' }]);
+    const types = (mode) => { writeSkinLoaderConfig({ gameDir: gd2, serverUrl: U, mode }); return JSON.parse(fs.readFileSync(path.join(gd2, 'CustomSkinLoader', 'CustomSkinLoader.json'), 'utf8')).loadlist.map((x) => x.type); };
+    assert.deepStrictEqual(types('premium'), ['CustomSkinAPI', 'MojangAPI']);
+    assert.deepStrictEqual(types('premium-fallback'), ['MojangAPI', 'CustomSkinAPI']);
+  }
+
+
+  // ---- Novedades, avisos de actualización y panel de administración ----
+  {
+    const worker = (await import('../worker/worker.mjs')).default;
+    const store = new Map();
+    const env = { ADMIN_TOKEN: 'clave-secreta-larga-123', SKINS: { get: async (k, t) => { const v = store.get(k); if (v === undefined) return null; return t === 'json' ? JSON.parse(v) : v; },
+                                                      put: async (k, v) => { store.set(k, v); } } };
+    const f = (u, o) => worker.fetch(new Request(u, o), env);
+    const U = 'https://api.test';
+    const auth = { authorization: 'Bearer clave-secreta-larga-123', 'content-type': 'application/json' };
+    const { compareVersions, fetchNews, checkUpdate } = require('../lib/updates');
+
+    assert.strictEqual(compareVersions('1.10.0', '1.9.9'), 1);
+    assert.strictEqual(compareVersions('v1.3.1', '1.3.1'), 0);
+    assert.strictEqual(compareVersions('1.3.0', '1.3.1'), -1);
+
+    // sin configurar: news null (el launcher usa sus novedades de respaldo)
+    assert.strictEqual(await fetchNews({ apiUrl: U, fetchImpl: f }), null);
+    assert.deepStrictEqual(await checkUpdate({ apiUrl: U, current: '1.3.1', fetchImpl: f }), { available: false, required: false });
+
+    // el panel exige contraseña
+    assert.strictEqual((await f(`${U}/api/admin/state`)).status, 401);
+    assert.strictEqual((await f(`${U}/api/admin/news`, { method: 'PUT', headers: { authorization: 'Bearer mala' }, body: '{}' })).status, 401);
+    assert.strictEqual((await worker.fetch(new Request(`${U}/api/admin/state`), {})).status, 503); // sin ADMIN_TOKEN
+    assert.ok((await (await f(`${U}/admin`)).text()).includes('Panel del launcher'));
+
+    const put = (p, body) => f(`${U}/api/admin/${p}`, { method: 'PUT', headers: auth, body: JSON.stringify(body) });
+    assert.strictEqual((await put('news', { news: [{ title: 'Hola', date: '2026-11-07', text: 'Mundo nuevo' }, { title: '', text: '' }] })).status, 200);
+    const news = await fetchNews({ apiUrl: U, fetchImpl: f });
+    assert.deepStrictEqual(news, [{ title: 'Hola', date: '2026-11-07', text: 'Mundo nuevo' }]);
+    assert.strictEqual((await put('news', { news: new Array(21).fill({ title: 'x' }) })).status, 400);
+
+    assert.strictEqual((await put('launcher', { version: '1.4.0', url: 'http://malo' })).status, 400);
+    assert.strictEqual((await put('launcher', { version: 'abc' })).status, 400);
+    assert.strictEqual((await put('launcher', { version: '1.4.0', url: 'https://x.test/setup.exe', notes: 'Nuevos mods', minVersion: '1.3.5' })).status, 200);
+    let u = await checkUpdate({ apiUrl: U, current: '1.3.1', fetchImpl: f });
+    assert.deepStrictEqual([u.available, u.required, u.version, u.url], [true, true, '1.4.0', 'https://x.test/setup.exe']);
+    u = await checkUpdate({ apiUrl: U, current: '1.4.0', fetchImpl: f });
+    assert.deepStrictEqual([u.available, u.required], [false, false]);
+    // un servidor caído no rompe: lanza error y el launcher conserva lo que tenía
+    await assert.rejects(checkUpdate({ apiUrl: U, current: '1.0.0', fetchImpl: async () => new Response('x', { status: 500 }) }), /HTTP 500/);
+    // un enlace que no sea https nunca se ofrece
+    store.set('cfg:launcher', JSON.stringify({ version: '9.0.0', url: 'file:///etc/passwd' }));
+    assert.strictEqual((await checkUpdate({ apiUrl: U, current: '1.0.0', fetchImpl: f })).url, '');
   }
 
   fs.rmSync(tmp, { recursive: true, force: true });

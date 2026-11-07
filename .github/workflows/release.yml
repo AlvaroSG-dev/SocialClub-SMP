@@ -1,0 +1,31 @@
+name: Publicar instalador
+
+# Se ejecuta al subir una etiqueta tipo v1.4.1:  git tag v1.4.1 && git push origin v1.4.1
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Comprobar que la etiqueta coincide con la versión de package.json
+        shell: bash
+        run: |
+          V=$(node -p "require('./package.json').version")
+          [ "v$V" = "${GITHUB_REF_NAME}" ] || { echo "La etiqueta ${GITHUB_REF_NAME} no coincide con package.json ($V)"; exit 1; }
+      - run: npm run dist:win
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/SocialClub-SMP-Setup-*.exe
+          generate_release_notes: true

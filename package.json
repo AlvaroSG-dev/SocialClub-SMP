@@ -1,6 +1,6 @@
 {
   "name": "socialclub-launcher",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Launcher propio para servidor NeoForge 1.21.1 (cuentas offline, mods incluidos)",
   "main": "main.js",
   "scripts": {
@@ -58,7 +58,8 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "perMachine": false
+      "perMachine": false,
+      "artifactName": "SocialClub-SMP-Setup-${version}.${ext}"
     },
     "linux": {
       "target": [

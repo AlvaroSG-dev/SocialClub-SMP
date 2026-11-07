@@ -13,17 +13,22 @@ const microsoft = require('./lib/microsoft');
 const { validateSkinPng, uploadSkin, fetchSkinData } = require('./lib/skins');
 const { newToken, uploadToSkinServer, fetchServerSkin, writeSkinLoaderConfig } = require('./lib/skinserver');
 
+const { fetchNews, checkUpdate } = require('./lib/updates');
+
 const skinServerUrl = (config.skins && config.skins.serverUrl) || '';
 
 const dataDir = path.join(app.getPath('appData'), config.dataFolderName);
 const gameDir = path.join(dataDir, 'minecraft');
 const runtimeDir = path.join(dataDir, 'runtime');
 const msCacheDir = path.join(dataDir, 'ms-auth');
+const mySkinFile = path.join(dataDir, 'my-skin.png');
 const settingsFile = path.join(dataDir, 'launcher-settings.json');
 
 // El modpack va dentro del instalador (extraResources) o en ./modpack durante el desarrollo.
 const modpackDir = app.isPackaged ? path.join(process.resourcesPath, 'modpack') : path.join(__dirname, 'modpack');
 
+const apiUrl = (config.api && config.api.url) || skinServerUrl; // novedades y actualizaciones
+let lastUpdate = null; // resultado de la última comprobación (la URL de descarga no sale de aquí)
 let win = null;
 let busy = false; // preparando/ejecutando el juego
 let loginBusy = false;
@@ -48,6 +53,23 @@ function send(channel, payload) {
 
 function errMsg(err) {
   return String(err && err.message ? err.message : err);
+}
+
+/** Última skin que el jugador aplicó (se guarda aquí para reutilizarla con otro nombre). */
+function savedSkin() {
+  try {
+    const data = fs.readFileSync(mySkinFile);
+    validateSkinPng(data);
+    return { data, variant: readSettings().mySkinVariant === 'slim' ? 'slim' : 'classic' };
+  } catch {
+    return null;
+  }
+}
+
+function skinToken() {
+  let t = readSettings().skinToken;
+  if (!t) { t = newToken(); writeSettings({ skinToken: t }); }
+  return t;
 }
 
 /** Guarda lo último que sabemos de la cuenta (nombre y skin) para mostrarlo sin volver a iniciar sesión. */
@@ -111,6 +133,7 @@ ipcMain.handle('init', () => {
       news: config.news || [],
       defaultRamMb: config.defaultRamMb,
       skinServer: Boolean(skinServerUrl),
+      hasSavedSkin: Boolean(savedSkin()),
       skinCommand: (config.skins && config.skins.command) || '/skin set web "URL_DE_TU_SKIN"',
     },
     settings: {
@@ -122,6 +145,32 @@ ipcMain.handle('init', () => {
     version: app.getVersion(),
   };
 });
+
+async function refreshUpdate() {
+  if (!apiUrl) return null;
+  try {
+    lastUpdate = await checkUpdate({ apiUrl, current: app.getVersion() });
+  } catch {
+    // sin conexión con el servidor de avisos: se conserva el último resultado
+  }
+  return lastUpdate;
+}
+
+ipcMain.handle('news', async () => {
+  if (!apiUrl) return config.news || [];
+  try {
+    const n = await fetchNews({ apiUrl });
+    return n === null ? config.news || [] : n;
+  } catch {
+    return null; // el renderer conserva lo que ya muestra
+  }
+});
+ipcMain.handle('update:check', async () => {
+  const u = await refreshUpdate();
+  if (!u) return { available: false, required: false };
+  return { available: u.available, required: u.required, version: u.version, notes: u.notes, canOpen: Boolean(u.url) };
+});
+ipcMain.handle('update:open', () => (lastUpdate && lastUpdate.url ? shell.openExternal(lastUpdate.url).then(() => true) : false));
 
 ipcMain.handle('status', () => getServerStatus(config.server.host, config.server.port));
 ipcMain.handle('open-folder', () => shell.openPath(gameDir));
@@ -188,20 +237,36 @@ ipcMain.handle('skin:current', async (_e, args) => {
   }
 });
 
+ipcMain.handle('skin:saved', () => {
+  const s = savedSkin();
+  return s ? { ok: true, dataUrl: `data:image/png;base64,${s.data.toString('base64')}`, variant: s.variant } : { ok: false };
+});
+
 ipcMain.handle('skin:upload', async (_e, { variant, accountType, username }) => {
-  if (!pickedSkinPath) return { ok: false, error: 'Primero elige un archivo PNG.' };
   if (accountType === 'offline') {
     if (!skinServerUrl) return { ok: false, error: 'Este launcher no tiene servidor de skins configurado.' };
     if (!validUsername(username)) return { ok: false, error: 'Pon primero tu nombre de jugador (3-16 caracteres).' };
     try {
-      let token = readSettings().skinToken;
-      if (!token) { token = newToken(); writeSettings({ skinToken: token }); }
-      await uploadToSkinServer({ serverUrl: skinServerUrl, name: username, token, data: fs.readFileSync(pickedSkinPath), variant });
+      let data;
+      let v = variant === 'slim' ? 'slim' : 'classic';
+      if (pickedSkinPath) {
+        data = fs.readFileSync(pickedSkinPath);
+      } else {
+        const saved = savedSkin();
+        if (!saved) return { ok: false, error: 'Primero elige un archivo PNG.' };
+        data = saved.data;
+        v = variant === 'slim' || variant === 'classic' ? variant : saved.variant;
+      }
+      await uploadToSkinServer({ serverUrl: skinServerUrl, name: username, token: skinToken(), data, variant: v });
+      fs.mkdirSync(dataDir, { recursive: true });
+      fs.writeFileSync(mySkinFile, data);
+      writeSettings({ mySkinVariant: v });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: errMsg(err) };
     }
   }
+  if (!pickedSkinPath) return { ok: false, error: 'Primero elige un archivo PNG.' };
   if (!microsoft.hasSession(msCacheDir)) return { ok: false, error: 'Inicia sesión con tu cuenta Microsoft primero.' };
   try {
     const ms = await getMicrosoftAuth();
@@ -219,6 +284,10 @@ ipcMain.handle('skin:upload', async (_e, { variant, accountType, username }) => 
 ipcMain.handle('play', async (_e, { accountType, username, ramMb }) => {
   if (busy || loginBusy) return { ok: false, error: 'Ya se está preparando el juego.' };
   const premium = accountType === 'microsoft';
+  const upd = await refreshUpdate();
+  if (upd && upd.required) {
+    return { ok: false, error: `Hay que actualizar el launcher a la versión ${upd.version} para poder jugar.` };
+  }
   if (!premium && !validUsername(username)) {
     return { ok: false, error: 'Nombre no válido: 3-16 caracteres, solo letras, números y _' };
   }
@@ -235,9 +304,11 @@ ipcMain.handle('play', async (_e, { accountType, username, ramMb }) => {
   try {
     fs.mkdirSync(gameDir, { recursive: true });
 
+    let msInfo = null;
     if (premium) {
       stage('Comprobando tu cuenta de Microsoft');
       const ms = await getMicrosoftAuth(); // falla pronto si la sesión caducó o no hay Minecraft
+      msInfo = ms;
       rememberMs(ms);
       log(`Sesión de Microsoft: ${ms.name}`);
     }
@@ -264,7 +335,33 @@ ipcMain.handle('play', async (_e, { accountType, username, ramMb }) => {
       progress,
     });
     log(`Mods: ${result.copied} instalados/actualizados, ${result.removed} eliminados.`);
-    if (skinServerUrl) writeSkinLoaderConfig({ gameDir, serverUrl: skinServerUrl });
+    if (skinServerUrl) {
+      let mode = premium ? 'premium-fallback' : 'offline';
+      try {
+        if (premium) {
+          // Copia tu skin real de Microsoft al servidor de skins, para que no gane una skin antigua de ese nombre.
+          if (msInfo.skin && msInfo.skin.url) {
+            const dataUrl = await fetchSkinData(msInfo.skin.url);
+            await uploadToSkinServer({
+              serverUrl: skinServerUrl, name: msInfo.name, token: skinToken(),
+              data: Buffer.from(dataUrl.split(',')[1], 'base64'),
+              variant: msInfo.skin.variant === 'slim' ? 'slim' : 'classic',
+            });
+            mode = 'premium';
+          }
+        } else {
+          // Nombre nuevo sin skin en el servidor: se le pone la última skin que elegiste.
+          const saved = savedSkin();
+          if (saved && !(await fetchServerSkin({ serverUrl: skinServerUrl, name: username }))) {
+            await uploadToSkinServer({ serverUrl: skinServerUrl, name: username, token: skinToken(), data: saved.data, variant: saved.variant });
+            log(`Skin aplicada al nombre ${username}.`);
+          }
+        }
+      } catch (err) {
+        log(`Skins: ${errMsg(err)}`);
+      }
+      writeSkinLoaderConfig({ gameDir, serverUrl: skinServerUrl, mode });
+    }
 
     // El token se pide justo antes de lanzar (la instalación puede tardar y el token caduca).
     let auth;

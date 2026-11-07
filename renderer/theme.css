@@ -146,3 +146,15 @@ button.small.ghost { color: var(--muted); }
 @media (prefers-reduced-motion: reduce) {
   .play, .fill { transition: none; }
 }
+
+/* ---- Aviso de actualización ---- */
+.update-bar {
+  position: absolute; z-index: 5; top: 14px; left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: min(560px, calc(100% - 420px));
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border-radius: 10px; font-size: 13px; line-height: 1.3;
+  background: rgba(247, 168, 200, 0.18); border: 1px solid var(--accent); color: var(--accent-2);
+  backdrop-filter: blur(6px);
+}
+.update-bar.required { background: rgba(255, 122, 140, 0.18); border-color: var(--bad); color: #ffd6dc; }
+.update-bar[hidden] { display: none; }

@@ -14,9 +14,10 @@ const el = {
   bgBtn: $('bg-btn'), bgMenu: $('bg-menu'), skinFile: $('skin-file'),
   skinVariant: $('skin-variant'), skinUpload: $('skin-upload'), skinMsg: $('skin-msg'),
   skinCmd: $('skin-cmd'),
+  updBar: $('update-bar'), updText: $('update-text'), updBtn: $('update-btn'),
 };
 
-const state = { skinServer: false, accountType: 'offline', msName: '', busy: false, skinPicked: false, skinPlaying: false };
+const state = { hasSaved: false, skinServer: false, accountType: 'offline', msName: '', busy: false, skinPicked: false, skinPlaying: false };
 
 function appendLog(text) {
   el.log.textContent += text + '\n';
@@ -56,7 +57,7 @@ function render() {
   el.msLogin.disabled = lock;
   el.msLogout.disabled = lock;
   const nameOk = /^[A-Za-z0-9_]{3,16}$/.test(el.username.value.trim());
-  el.skinUpload.disabled = !(state.skinPicked && (ms ? logged : state.skinServer && nameOk)) || lock;
+  el.skinUpload.disabled = !((ms ? state.skinPicked : true) && (ms ? logged : state.skinServer && nameOk && (state.skinPicked || state.hasSaved))) || lock;
   el.skinUpload.textContent = ms ? 'Subir a mi cuenta' : 'Aplicar mi skin';
   $('skin-sec-ms').hidden = !ms;
   $('skin-sec-cmd').hidden = ms || state.skinServer;
@@ -98,6 +99,7 @@ async function main() {
   el.ramLabel.textContent = `${el.ram.value} MB`;
   el.skinCmd.textContent = config.skinCommand;
   state.skinServer = config.skinServer;
+  state.hasSaved = config.hasSavedSkin;
   state.accountType = settings.accountType;
   state.msName = settings.msName;
   renderNews(config.news);
@@ -166,20 +168,43 @@ async function main() {
     return skinView;
   }
 
-  $('open-skins').addEventListener('click', async () => {
+  // Muestra la skin que corresponde a la cuenta/nombre actual (si no hay un PNG recién elegido).
+  let refreshSeq = 0;
+  async function refreshSkinPreview() {
+    const view = ensureSkinView();
+    if (!view || state.skinPicked) return;
+    const seq = ++refreshSeq;
+    const offline = state.accountType === 'offline';
+    const name = el.username.value.trim();
+    let cur = { ok: false };
+    if (offline || state.msName) cur = await window.launcher.skinCurrent({ accountType: state.accountType, username: name });
+    let note = '';
+    if (!cur.ok && offline && state.hasSaved) {
+      cur = await window.launcher.skinSaved();
+      note = `«${name || 'tu nombre'}» aún no tiene skin en el servidor: pulsa Aplicar para ponerle esta.`;
+    }
+    if (seq !== refreshSeq || state.skinPicked) return;
+    if (cur.ok) {
+      syncModel(cur.variant === 'slim' ? 'slim' : 'classic');
+      view.show(cur.dataUrl, el.skinVariant.value);
+      el.skinFile.textContent = note ? 'Tu última skin guardada' : (offline ? 'Skin actual en el servidor' : 'Skin actual de tu cuenta');
+    }
+    setSkinMsg(note, '');
+  }
+
+  $('open-skins').addEventListener('click', () => {
     el.skinModal.hidden = false;
     const view = ensureSkinView();
     if (view) view.pause(false);
-    // Con sesión de Microsoft se muestra la skin que ya tiene la cuenta.
-    const offline = state.accountType === 'offline';
-    if (view && (offline || state.msName) && !state.skinPicked) {
-      const cur = await window.launcher.skinCurrent({ accountType: state.accountType, username: el.username.value.trim() });
-      if (cur.ok && !state.skinPicked) {
-        syncModel(cur.variant === 'slim' ? 'slim' : 'classic');
-        view.show(cur.dataUrl, el.skinVariant.value);
-      }
-    }
+    refreshSkinPreview();
   });
+  let nameTimer = 0;
+  el.username.addEventListener('input', () => {
+    clearTimeout(nameTimer);
+    nameTimer = setTimeout(() => { if (!el.skinModal.hidden) refreshSkinPreview(); }, 400);
+  });
+  el.tabOffline.addEventListener('click', () => { if (!el.skinModal.hidden) refreshSkinPreview(); });
+  el.tabMicrosoft.addEventListener('click', () => { if (!el.skinModal.hidden) refreshSkinPreview(); });
   $('skin-close').addEventListener('click', () => {
     el.skinModal.hidden = true;
     el.bgMenu.hidden = true;
@@ -243,6 +268,7 @@ async function main() {
     setSkinMsg('Subiendo…');
     const res = await window.launcher.skinUpload({ variant: el.skinVariant.value, accountType: state.accountType, username: el.username.value.trim() });
     state.busy = false;
+    if (res.ok && state.accountType === 'offline') { state.hasSaved = true; state.skinPicked = false; }
     setSkinMsg(res.ok ? (state.accountType === 'offline' ? '¡Listo! Entra al servidor y se verá (los demás la ven al reconectar).' : '¡Listo! Tu skin se actualizará en unos minutos.') : res.error, res.ok ? 'good' : 'bad');
     render();
   });
@@ -276,6 +302,27 @@ async function main() {
       render();
     }
   });
+
+  // --- novedades y actualizaciones (se consultan al abrir y cada pocos minutos) ---
+  async function refreshNews() {
+    const items = await window.launcher.news();
+    if (items) renderNews(items);
+  }
+  async function refreshUpdate() {
+    const u = await window.launcher.updateCheck();
+    el.updBar.hidden = !u.available;
+    if (!u.available) return;
+    el.updBar.classList.toggle('required', Boolean(u.required));
+    el.updText.textContent = u.required
+      ? `Hay que actualizar a la versión ${u.version} para poder jugar.`
+      : `Actualización disponible: versión ${u.version}.${u.notes ? ' ' + u.notes : ''}`;
+    el.updBtn.hidden = !u.canOpen;
+  }
+  el.updBtn.addEventListener('click', () => window.launcher.updateOpen());
+  refreshNews();
+  refreshUpdate();
+  setInterval(refreshNews, 5 * 60 * 1000);
+  setInterval(refreshUpdate, 30 * 60 * 1000);
 
   refreshStatus();
   setInterval(refreshStatus, 30000);
