@@ -190,7 +190,8 @@ const { findJava } = require('../lib/java');
     const worker = (await import('../worker/worker.mjs')).default;
     const store = new Map();
     const env = { SKINS: { get: async (k, t) => { const v = store.get(k); if (v === undefined) return null; return t === 'json' ? JSON.parse(v) : t === 'arrayBuffer' ? v : v; },
-                           put: async (k, v) => { store.set(k, typeof v === 'string' ? v : v.slice().buffer); } } };
+                           put: async (k, v) => { store.set(k, typeof v === 'string' ? v : v.slice().buffer); },
+                           delete: async (k) => { store.delete(k); } } };
     const { uploadToSkinServer, fetchServerSkin, writeSkinLoaderConfig, newToken } = require('../lib/skinserver');
     const png = Buffer.alloc(100); Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]).copy(png);
     png.writeUInt32BE(64, 16); png.writeUInt32BE(64, 20);
@@ -211,6 +212,15 @@ const { findJava } = require('../lib/java');
     await uploadToSkinServer({ serverUrl: U, name: 'Alvaro', token: tokA, data: png, variant: 'classic', fetchImpl });
     assert.ok((await (await f(`${U}/Alvaro.json`)).json()).skins.default);
     assert.strictEqual((await f(`${U}/nadie.json`)).status, 404);
+    // quitar la skin: solo con el token de quien la puso
+    const { deleteFromSkinServer } = require('../lib/skinserver');
+    await assert.rejects(deleteFromSkinServer({ serverUrl: U, name: 'Alvaro', token: tokB, fetchImpl }), /otro ordenador/);
+    await deleteFromSkinServer({ serverUrl: U, name: 'alvaro', token: tokA, fetchImpl });
+    assert.strictEqual((await f(`${U}/Alvaro.json`)).status, 404);
+    await deleteFromSkinServer({ serverUrl: U, name: 'Alvaro', token: tokB, fetchImpl }); // ya no existe: sin error
+    await uploadToSkinServer({ serverUrl: U, name: 'Alvaro', token: tokB, data: png, variant: 'classic', fetchImpl }); // y otro puede reclamarlo
+    await deleteFromSkinServer({ serverUrl: U, name: 'Alvaro', token: tokB, fetchImpl });
+    await uploadToSkinServer({ serverUrl: U, name: 'Alvaro', token: tokA, data: png, variant: 'classic', fetchImpl });
     // el servidor valida por su cuenta (sin pasar por el cliente)
     const bad = Buffer.from(png); bad.writeUInt32BE(100, 16);
     assert.strictEqual((await f(`${U}/skin/Bob_1`, { method: 'POST', headers: { 'x-skin-token': tokA }, body: bad })).status, 400);
@@ -274,6 +284,37 @@ const { findJava } = require('../lib/java');
     // un enlace que no sea https nunca se ofrece
     store.set('cfg:launcher', JSON.stringify({ version: '9.0.0', url: 'file:///etc/passwd' }));
     assert.strictEqual((await checkUpdate({ apiUrl: U, current: '1.0.0', fetchImpl: f })).url, '');
+  }
+
+
+  // ---- Lista de servidores del juego (servers.dat) ----
+  {
+    const { ensureServer, parse, serialize } = require('../lib/servers');
+    const dir = fs.mkdtempSync(path.join(tmp, 'srv-'));
+    const file = path.join(dir, 'servers.dat');
+    const names = () => parse(fs.readFileSync(file)).root.find((e) => e.name.toString() === 'servers').value.items
+      .map((it) => it.map((e) => `${e.name}=${e.type === 8 ? e.value.toString() : '#'}`).join(','));
+
+    assert.strictEqual(ensureServer({ gameDir: dir, name: 'SC', host: 'a.b.com', port: 25565 }), 'created');
+    assert.deepStrictEqual(names(), ['name=SC,ip=a.b.com']);
+    assert.strictEqual(ensureServer({ gameDir: dir, name: 'SC', host: 'A.b.com', port: 25565 }), 'present');
+
+    // servers.dat de un jugador con otro servidor, con campos extra (icono, byte "hidden")
+    const other = [{ type: 8, name: Buffer.from('name'), value: Buffer.from('Mio') }, { type: 8, name: Buffer.from('ip'), value: Buffer.from('mio.net:25566') },
+      { type: 8, name: Buffer.from('icon'), value: Buffer.from('AAAA') }, { type: 1, name: Buffer.from('hidden'), value: Buffer.from([1]) }];
+    fs.writeFileSync(file, serialize({ rootName: Buffer.alloc(0), root: [{ type: 9, name: Buffer.from('servers'), value: { itemType: 10, items: [other] } }] }));
+    assert.strictEqual(ensureServer({ gameDir: dir, name: 'SC', host: 'a.b.com', port: 25565 }), 'added');
+    assert.deepStrictEqual(names(), ['name=Mio,ip=mio.net:25566,icon=AAAA,hidden=#', 'name=SC,ip=a.b.com']);
+    assert.ok(fs.existsSync(file + '.launcher-bak'));
+    assert.strictEqual(ensureServer({ gameDir: dir, name: 'SC', host: 'a.b.com', port: 25565 }), 'present');
+    assert.strictEqual(ensureServer({ gameDir: dir, name: 'SC2', host: 'a.b.com', port: 25570 }), 'added'); // otro puerto = otro servidor
+
+    // lista vacía y archivo ilegible
+    fs.writeFileSync(file, serialize({ rootName: Buffer.alloc(0), root: [{ type: 9, name: Buffer.from('servers'), value: { itemType: 0, items: [] } }] }));
+    assert.strictEqual(ensureServer({ gameDir: dir, name: 'SC', host: 'x.y', port: 25565 }), 'added');
+    fs.writeFileSync(file, Buffer.from('basura que no es nbt'));
+    assert.strictEqual(ensureServer({ gameDir: dir, name: 'SC', host: 'x.y', port: 25565 }), 'skipped');
+    assert.strictEqual(fs.readFileSync(file).toString(), 'basura que no es nbt'); // no se toca
   }
 
   fs.rmSync(tmp, { recursive: true, force: true });

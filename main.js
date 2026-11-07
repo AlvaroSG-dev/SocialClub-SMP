@@ -11,9 +11,10 @@ const { installGame, launchGame } = require('./lib/game');
 const { getServerStatus } = require('./lib/status');
 const microsoft = require('./lib/microsoft');
 const { validateSkinPng, uploadSkin, fetchSkinData } = require('./lib/skins');
-const { newToken, uploadToSkinServer, fetchServerSkin, writeSkinLoaderConfig } = require('./lib/skinserver');
+const { newToken, uploadToSkinServer, deleteFromSkinServer, fetchServerSkin, writeSkinLoaderConfig } = require('./lib/skinserver');
 
 const { fetchNews, checkUpdate } = require('./lib/updates');
+const { ensureServer } = require('./lib/servers');
 
 const skinServerUrl = (config.skins && config.skins.serverUrl) || '';
 
@@ -64,6 +65,17 @@ function savedSkin() {
   } catch {
     return null;
   }
+}
+
+/** Quién escribió por última vez la skin de un nombre en el servidor: 'premium' (copiada de Microsoft) u 'offline' (la que elegiste). */
+function slotOf(name) {
+  return (readSettings().skinSlots || {})[String(name).toLowerCase()] || '';
+}
+function setSlot(name, source) {
+  const slots = { ...(readSettings().skinSlots || {}) };
+  if (source) slots[String(name).toLowerCase()] = source;
+  else delete slots[String(name).toLowerCase()];
+  writeSettings({ skinSlots: slots });
 }
 
 function skinToken() {
@@ -261,6 +273,7 @@ ipcMain.handle('skin:upload', async (_e, { variant, accountType, username }) => 
       fs.mkdirSync(dataDir, { recursive: true });
       fs.writeFileSync(mySkinFile, data);
       writeSettings({ mySkinVariant: v });
+      setSlot(username, 'offline');
       return { ok: true };
     } catch (err) {
       return { ok: false, error: errMsg(err) };
@@ -335,6 +348,12 @@ ipcMain.handle('play', async (_e, { accountType, username, ramMb }) => {
       progress,
     });
     log(`Mods: ${result.copied} instalados/actualizados, ${result.removed} eliminados.`);
+    try {
+      const r = ensureServer({ gameDir, name: config.server.name, host: config.server.host, port: config.server.port });
+      if (r === 'created' || r === 'added') log('Servidor añadido a tu lista de multijugador.');
+    } catch (err) {
+      log(`Lista de servidores: ${errMsg(err)}`);
+    }
     if (skinServerUrl) {
       let mode = premium ? 'premium-fallback' : 'offline';
       try {
@@ -347,14 +366,23 @@ ipcMain.handle('play', async (_e, { accountType, username, ramMb }) => {
               data: Buffer.from(dataUrl.split(',')[1], 'base64'),
               variant: msInfo.skin.variant === 'slim' ? 'slim' : 'classic',
             });
+            setSlot(msInfo.name, 'premium');
             mode = 'premium';
           }
         } else {
-          // Nombre nuevo sin skin en el servidor: se le pone la última skin que elegiste.
+          // Cada cuenta ve su skin: si el hueco de este nombre tiene la skin copiada de Microsoft, se cambia
+          // por la última que elegiste, o se quita (Steve/Alex) si no elegiste ninguna.
           const saved = savedSkin();
-          if (saved && !(await fetchServerSkin({ serverUrl: skinServerUrl, name: username }))) {
+          const hasServerSkin = Boolean(await fetchServerSkin({ serverUrl: skinServerUrl, name: username }));
+          const fromPremium = slotOf(username) === 'premium';
+          if (saved && (!hasServerSkin || slotOf(username) !== 'offline')) {
             await uploadToSkinServer({ serverUrl: skinServerUrl, name: username, token: skinToken(), data: saved.data, variant: saved.variant });
+            setSlot(username, 'offline');
             log(`Skin aplicada al nombre ${username}.`);
+          } else if (!saved && hasServerSkin && fromPremium) {
+            await deleteFromSkinServer({ serverUrl: skinServerUrl, name: username, token: skinToken() });
+            setSlot(username, '');
+            log(`Se quitó la skin de Microsoft del nombre ${username} (cuenta sin premium).`);
           }
         }
       } catch (err) {

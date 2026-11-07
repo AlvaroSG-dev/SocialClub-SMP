@@ -129,6 +129,7 @@ async function main() {
     await window.launcher.msLogout();
     state.msName = '';
     render();
+    if (!el.skinModal.hidden) refreshSkinPreview();
   });
 
   window.launcher.onMsCode((data) => {
@@ -184,7 +185,10 @@ async function main() {
       note = `«${name || 'tu nombre'}» aún no tiene skin en el servidor: pulsa Aplicar para ponerle esta.`;
     }
     if (seq !== refreshSeq || state.skinPicked) return;
-    if (cur.ok) {
+    if (!cur.ok) {
+      view.clear(); // sin skin: Steve/Alex, no la que se estaba mostrando antes
+      el.skinFile.textContent = 'Ningún archivo (64x64)';
+    } else {
       syncModel(cur.variant === 'slim' ? 'slim' : 'classic');
       view.show(cur.dataUrl, el.skinVariant.value);
       el.skinFile.textContent = note ? 'Tu última skin guardada' : (offline ? 'Skin actual en el servidor' : 'Skin actual de tu cuenta');

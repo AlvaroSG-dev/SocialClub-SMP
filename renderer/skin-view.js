@@ -143,6 +143,7 @@
 
     return {
       show(dataUrl, variant) { current = { dataUrl, variant }; apply(); },
+      clear() { current = null; apply(); },
       setModel(variant) { if (current) { current.variant = variant; apply(); } },
       setPlaying(on) { viewer.animation = on ? Object.assign(new sv.WalkingAnimation(), { speed: 0.7 }) : null; },
       setBackground,

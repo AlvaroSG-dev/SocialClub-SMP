@@ -110,6 +110,21 @@ export default {
         return new Response(tex, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=31536000, immutable' } });
       }
 
+      if (request.method === 'DELETE' && parts.length === 2 && parts[0] === 'skin') {
+        const name = parts[1];
+        if (!NAME_RE.test(name)) return json({ error: 'Nombre no válido.' }, 400);
+        const token = request.headers.get('x-skin-token') || '';
+        if (token.length < 16 || token.length > 128) return json({ error: 'Falta el token.' }, 401);
+        const key = `skin:${name.toLowerCase()}`;
+        const old = await env.SKINS.get(key, 'json');
+        if (!old) return json({ ok: true });
+        if (old.tokenHash !== (await sha256(new TextEncoder().encode(token)))) {
+          return json({ error: 'Ese nombre ya tiene una skin puesta desde otro ordenador.' }, 403);
+        }
+        await env.SKINS.delete(key);
+        return json({ ok: true });
+      }
+
       if (request.method === 'POST' && parts.length === 2 && parts[0] === 'skin') {
         const name = parts[1];
         if (!NAME_RE.test(name) || ['news', 'launcher', 'admin'].includes(name.toLowerCase())) return json({ error: 'Nombre no válido.' }, 400);
