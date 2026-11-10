@@ -24,7 +24,7 @@ jobs:
         run: |
           V=$(node -p "require('./package.json').version")
           [ "v$V" = "${GITHUB_REF_NAME}" ] || { echo "La etiqueta ${GITHUB_REF_NAME} no coincide con package.json ($V)"; exit 1; }
-      - name: Construir el instalador (sin publicar: lo sube el paso siguiente)
+      - name: "Construir el instalador (sin publicar: lo sube el paso siguiente)"
         run: npm run dist:win -- --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
