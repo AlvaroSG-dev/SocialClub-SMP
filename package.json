@@ -1,6 +1,6 @@
 {
   "name": "socialclub-launcher",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Launcher propio para servidor NeoForge 1.21.1 (cuentas offline, mods incluidos)",
   "main": "main.js",
   "scripts": {
