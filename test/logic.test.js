@@ -317,6 +317,25 @@ const { findJava } = require('../lib/java');
     assert.strictEqual(fs.readFileSync(file).toString(), 'basura que no es nbt'); // no se toca
   }
 
+
+  // ---- Reintentos y mensajes de error de descarga ----
+  {
+    const { describeError, withRetries } = require('../lib/game');
+    const agg = Object.assign(new AggregateError([Object.assign(new Error('connect ETIMEDOUT'), { code: 'ETIMEDOUT' }), new Error('connect ETIMEDOUT')], 'Multiple errors occurred during download process'),
+      { urls: ['https://resources.download.minecraft.net/ab/abcd?x=1'] });
+    assert.strictEqual(describeError(agg), 'Multiple errors occurred during download process: connect ETIMEDOUT [https://resources.download.minecraft.net/ab/abcd]');
+    assert.strictEqual(describeError(new Error('simple')), 'simple');
+    let n = 0;
+    const logs = [];
+    const ok = await withRetries(async () => { if (++n < 3) throw agg; return 'listo'; }, { log: (l) => logs.push(l), sleep: async () => {} });
+    assert.strictEqual(ok, 'listo');
+    assert.strictEqual(n, 3);
+    assert.strictEqual(logs.length, 2);
+    let m = 0;
+    await assert.rejects(withRetries(async () => { m++; throw new Error('siempre falla'); }, { tries: 3, sleep: async () => {} }), /siempre falla/);
+    assert.strictEqual(m, 3);
+  }
+
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log('OK: todas las pruebas pasan');
 })().catch((e) => { console.error(e); process.exit(1); });

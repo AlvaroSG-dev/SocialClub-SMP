@@ -7,7 +7,7 @@ const config = require('./launcher.config.json');
 const { validUsername, offlineAuth } = require('./lib/auth');
 const { syncModpack } = require('./lib/modpack');
 const { ensureJava } = require('./lib/java');
-const { installGame, launchGame } = require('./lib/game');
+const { installGame, launchGame, describeError } = require('./lib/game');
 const { getServerStatus } = require('./lib/status');
 const microsoft = require('./lib/microsoft');
 const { validateSkinPng, uploadSkin, fetchSkinData } = require('./lib/skins');
@@ -53,7 +53,7 @@ function send(channel, payload) {
 }
 
 function errMsg(err) {
-  return String(err && err.message ? err.message : err);
+  return describeError(err);
 }
 
 /** Última skin que el jugador aplicó (se guarda aquí para reutilizarla con otro nombre). */
